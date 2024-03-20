@@ -225,6 +225,7 @@ def complete_code(
     task,
     accelerator,
     model,
+    model_type,
     tokenizer,
     dataloader,
     n_tasks,
@@ -297,11 +298,42 @@ def complete_code(
                         **gen_kwargs,
                     )
                 else:
-                    generated_tokens = model.generate(
-                        input_ids=inputs,
-                        num_return_sequences=batch_size,
-                        **gen_kwargs,
-                    )
+                    if model_type == "mamba":
+                        inputs = inputs.repeat(batch_size, 1)
+                        #print(inputs.size())
+                        # Extracting only max_length and temperature
+                        max_length = gen_kwargs['max_length']
+                        temperature = gen_kwargs['temperature']
+                        top_p = gen_kwargs['top_p'] 
+                        top_k = gen_kwargs['top_k']
+                        generated_tokens = model.generate(
+                            input_ids=inputs,
+                            max_length=max_length,
+                            temperature=temperature,
+                            top_p=top_p,
+                            top_k=top_k,
+                            eos_token_id=0,
+                        )
+                        #print(generated_tokens.size())
+                    # elif model_type == "gla":
+                    #     inputs = inputs.repeat(batch_size, 1)
+                    #     model.eval()
+
+                    #     generated_tokens, _ = model.generate(
+                    #     inputs, gen_kwargs['max_length'], hidden=None, 
+                    #     temperature=gen_kwargs['temperature'], do_sample=gen_kwargs['do_sample']
+                    #     )
+                    else:
+                        generated_tokens = model.generate(
+                            input_ids=inputs,
+                            num_return_sequences=batch_size,
+                            do_sample = gen_kwargs['do_sample'],
+                            max_new_tokens = gen_kwargs['max_length'],
+                            temperature = gen_kwargs['temperature'],
+                            top_p = gen_kwargs['top_p'], 
+                            top_k = gen_kwargs['top_k'],
+                        )
+                        
             # each task is generated batch_size times
             generated_tasks = batch["task_id"].repeat(batch_size)
             generated_tokens = accelerator.pad_across_processes(

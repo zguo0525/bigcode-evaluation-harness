@@ -138,10 +138,13 @@ def parallel_generations(
         # model.to() is not supported for 8bit and 4bit models
         model, ds_loader = accelerator.prepare(model, ds_loader)
 
+    model_type = args.modeltype
+
     generations = complete_code(
         task,
         accelerator,
         model,
+        model_type,
         tokenizer,
         ds_loader,
         n_tasks=n_tasks,
