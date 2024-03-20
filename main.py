@@ -11,13 +11,15 @@ from transformers import (
     AutoModelForCausalLM,
     AutoModelForSeq2SeqLM,
     AutoTokenizer,
-    HfArgumentParser,
+    HfArgumentParser, AutoConfig,
 )
 
 from bigcode_eval.arguments import EvalArguments
 from bigcode_eval.evaluator import Evaluator
 from bigcode_eval.tasks import ALL_TASKS
-
+# import multiprocessing as mp
+from huggingface_hub import login
+login(token="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")
 
 class MultiChoice:
     def __init__(self, choices):
@@ -43,6 +45,11 @@ def parse_args():
         "--model",
         default="codeparrot/codeparrot-small",
         help="Model to evaluate, provide a repo name in Hugging Face hub or a local path",
+    )
+    parser.add_argument(
+        "--tokenizer",
+        default="codeparrot/codeparrot-small",
+        help="Tokenizer to use",
     )
     parser.add_argument(
         "--modeltype",
@@ -291,10 +298,40 @@ def main():
                     print("Loading model in auto mode")
 
         if args.modeltype == "causal":
+            try:
+                model = AutoModelForCausalLM.from_pretrained(
+                    args.model,
+                    **model_kwargs,
+                )
+            except:
+                model = AutoModelForCausalLM.from_pretrained(
+                    args.model,
+                    trust_remote_code=True,
+                    torch_dtype=dict_precisions[args.precision]
+                )
+                model = model.to('cuda:0') 
+        elif args.modeltype == "mamba":
+            from mamba_ssm.models.mixer_seq_simple import MambaLMHeadModel
+            model = MambaLMHeadModel.from_pretrained(
+                args.model,
+            )
+        elif args.modeltype == "gla":
+            from mingpt.models.gla import GLAConfig, GLAForCausalLM
+            AutoConfig.register("gla", GLAConfig)
+            AutoModelForCausalLM.register(GLAConfig, GLAForCausalLM)
+            model = GLAForCausalLM.from_pretrained(
+                args.model,
+                **model_kwargs,
+            )
+        elif args.modeltype == "moe":
+            from moduleformer2_hf.moduleformer.modeling_moduleformer import ModuleFormerForCausalLM, ModuleFormerConfig
+            AutoConfig.register("moduleformer", ModuleFormerConfig)
+            AutoModelForCausalLM.register(ModuleFormerConfig, ModuleFormerForCausalLM)
             model = AutoModelForCausalLM.from_pretrained(
                 args.model,
                 **model_kwargs,
             )
+            model = model.to('cuda:0')
         elif args.modeltype == "seq2seq":
             warnings.warn(
                 "Seq2Seq models have only been tested for HumanEvalPack & CodeT5+ models."
@@ -318,23 +355,46 @@ def main():
 
         if args.left_padding:
             # left padding is required for some models like chatglm3-6b
-            tokenizer = AutoTokenizer.from_pretrained(
-                args.model,
+            try:
+                tokenizer = AutoTokenizer.from_pretrained(
+                args.tokenizer,
                 revision=args.revision,
                 trust_remote_code=args.trust_remote_code,
                 use_auth_token=args.use_auth_token,
-                padding_side="left",  
-            )
+                padding_side="left",
+                use_fast=False,
+                )
+            except:
+                tokenizer = AutoTokenizer.from_pretrained(
+                args.tokenizer,
+                revision=args.revision,
+                trust_remote_code=args.trust_remote_code,
+                use_auth_token=args.use_auth_token,
+                padding_side="left",
+                use_fast=True,
+                )
         else:
             # used by default for most models
-            tokenizer = AutoTokenizer.from_pretrained(
-                args.model,
-                revision=args.revision,
-                trust_remote_code=args.trust_remote_code,
-                use_auth_token=args.use_auth_token,
-                truncation_side="left",
-                padding_side="right",  
-            )
+            try:
+                tokenizer = AutoTokenizer.from_pretrained(
+                    args.tokenizer,
+                    revision=args.revision,
+                    trust_remote_code=args.trust_remote_code,
+                    use_auth_token=args.use_auth_token,
+                    truncation_side="left",
+                    padding_side="right",
+                    use_fast=False,  
+                    )
+            except:
+                tokenizer = AutoTokenizer.from_pretrained(
+                    args.tokenizer,
+                    revision=args.revision,
+                    trust_remote_code=args.trust_remote_code,
+                    use_auth_token=args.use_auth_token,
+                    truncation_side="left",
+                    padding_side="right",
+                    use_fast=True,  
+                    )                
         if not tokenizer.eos_token:
             if tokenizer.bos_token:
                 tokenizer.eos_token = tokenizer.bos_token
@@ -409,4 +469,5 @@ def main():
 
 
 if __name__ == "__main__":
+    # mp.set_start_method('spawn')
     main()
